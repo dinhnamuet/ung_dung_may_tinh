@@ -101,6 +101,7 @@ static void lay_mau(struct timer_list *my_t)
 	}
 	sprintf(dongco.kernel_buffer, "%s %d %d", mid_res, dongco.count, dongco.time_current);
 	dongco.count = 0;
+	printk(KERN_INFO "%s\n", dongco.kernel_buffer);
 	local_irq_enable();
 	mod_timer(&my_timer, jiffies + HZ/50);
 }
@@ -246,6 +247,8 @@ static int __init dongco_init(void)
 	//my_timer.data		= 0;
 	my_timer.function	= lay_mau;
 	add_timer(&my_timer);
+	dongco.time_start = jiffies;
+	motor_forward();
 
 	tick_per_sec		= HZ;
 	printk(KERN_INFO "Init success!, HZ = %lld\n", tick_per_sec);
@@ -265,6 +268,7 @@ rm_dev_num:
 
 static void __exit dongco_exit(void)
 {
+	motor_stop();
 	del_timer(&my_timer);
 	free_irq(irq_number, NULL);
 	kfree(dongco.kernel_buffer);
