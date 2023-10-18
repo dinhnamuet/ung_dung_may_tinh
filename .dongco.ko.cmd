@@ -1,1 +1,0 @@
-cmd_/home/pi/Desktop/ung_dung_may_tinh/dongco.ko := ld -r -EL  -maarch64elf -z noexecstack --build-id=sha1  -T scripts/module.lds -o /home/pi/Desktop/ung_dung_may_tinh/dongco.ko /home/pi/Desktop/ung_dung_may_tinh/dongco.o /home/pi/Desktop/ung_dung_may_tinh/dongco.mod.o;  true
