@@ -1,0 +1,1 @@
+cmd_/home/pi/Desktop/ung_dung_may_tinh/Module.symvers :=  sed 's/ko$$/o/'  /home/pi/Desktop/ung_dung_may_tinh/modules.order | scripts/mod/modpost -m -a    -o /home/pi/Desktop/ung_dung_may_tinh/Module.symvers -e -i Module.symvers -T - 

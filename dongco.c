@@ -8,6 +8,7 @@
 #include <linux/timer.h>
 #include <linux/interrupt.h>
 #include <linux/gpio.h>
+#include <linux/pwm.h>
 #include "dongco.h"
 
 MODULE_LICENSE("GPL");
@@ -29,6 +30,9 @@ struct dong_co_pid {
 	volatile unsigned int count;
 	volatile uint32_t time_start;
 	volatile uint32_t time_current;
+	struct pwm_device *dc_pwm;
+	uint32_t period;
+	uint32_t duty_cycle;
 }dongco;
 
 char *forward	= "Forward";
@@ -95,13 +99,13 @@ static void lay_mau(struct timer_list *my_t)
 	{
 		strncpy(mid_res, reverse, strlen(reverse));
 	}
-	else
+else
 	{
 		strncpy(mid_res, stop, strlen(stop));
 	}
 	sprintf(dongco.kernel_buffer, "%s %d %d", mid_res, dongco.count, dongco.time_current);
 	dongco.count = 0;
-	printk(KERN_INFO "%s\n", dongco.kernel_buffer);
+	//printk(KERN_INFO "%s\n", dongco.kernel_buffer);
 	local_irq_enable();
 	mod_timer(&my_timer, jiffies + HZ/50);
 }
@@ -159,13 +163,47 @@ static ssize_t dev_write(struct file *filep, const char *user_buff, size_t size,
 	local_irq_enable(); //enable lai ngat
 	return size;
 }
+static long dev_ioctl(struct file *filep, unsigned int cmd, unsigned long data)
+{
+	dongco.period = 31875;
+	switch(cmd)
+	{
+		case FORWARD:
+			if(copy_from_user(&dongco.duty_cycle, (uint32_t *)data, sizeof(dongco.duty_cycle)) != 0)
+			{
+				printk(KERN_ERR "data receive failed\n");
+				break;
+			}
+			motor_forward();
+			pwm_config(dongco.dc_pwm, dongco.duty_cycle, dongco.period);
+			break;
+		case REVERSE:
+			if(copy_from_user(&dongco.duty_cycle, (uint32_t *)data, sizeof(dongco.duty_cycle)) != 0)
+			{
+				printk(KERN_ERR "data receives failed\n");
+				break;
+			}
+			motor_reverse();
+			pwm_config(dongco.dc_pwm, dongco.duty_cycle, dongco.period);
+			break;
+		case STOP:
+			motor_stop();
+			pwm_config(dongco.dc_pwm, 0, dongco.period);
+			break;
+		default:
+			break;
 
+	}
+	printk(KERN_INFO "IOCTL called, duty cycle is %d\n", dongco.duty_cycle);
+	return 0;
+}
 struct file_operations fops = {
 	.owner		= THIS_MODULE,
 	.open		= dev_open,
 	.release	= dev_close,
 	.read		= dev_read,
-	.write		= dev_write
+	.write		= dev_write,
+	.unlocked_ioctl	= dev_ioctl
 };
 
 static int __init dongco_init(void)
@@ -248,6 +286,16 @@ static int __init dongco_init(void)
 	my_timer.function	= lay_mau;
 	add_timer(&my_timer);
 	dongco.time_start = jiffies;
+	/* config pwm */
+	dongco.dc_pwm = pwm_request(0, "my_motor");
+	if(dongco.dc_pwm == NULL)
+	{
+		printk(KERN_ERR "cannot init pwm\n");
+		goto rm_buff;
+	}
+	pwm_config(dongco.dc_pwm, 21875, 31875);
+	pwm_enable(dongco.dc_pwm);
+
 	motor_forward();
 
 	tick_per_sec		= HZ;
@@ -269,6 +317,8 @@ rm_dev_num:
 static void __exit dongco_exit(void)
 {
 	motor_stop();
+	pwm_disable(dongco.dc_pwm);
+	pwm_free(dongco.dc_pwm);
 	del_timer(&my_timer);
 	free_irq(irq_number, NULL);
 	kfree(dongco.kernel_buffer);

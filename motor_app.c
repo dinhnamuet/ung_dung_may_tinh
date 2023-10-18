@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <math.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -11,21 +12,29 @@
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include "dongco.h"
 #define shared "encoder_read"
+#define set_point "set_point"
 #define named_semaphore "process_lock"
 /* b1 viet 1 process co 2 thread gui & nhan socket */
 pthread_t smg, rmg; /* threads of parent */
 pthread_t r_e, wm; /* threads of child */
 int chat_fd;
 sem_t *lock;
+
+struct data {
+	char *setting;
+	char *reading;
+};
+
 /* parent process */
 /* thread to send data */
 static void *send_msg(void *args)
 {
-	char *message = (char *)args;
-	printf("%s\n", message);
+	struct data *foo = (struct data *)args;
 	char msg_sock[100];
 	char last_msg[100];
 	char direction[30];
@@ -36,22 +45,20 @@ static void *send_msg(void *args)
 	{
 		int current_sem = 0;
 		sem_getvalue(lock, &current_sem);
-		//printf("Semaphore of send socket process == %d\n", current_sem);
 		if(current_sem == 0)
 		{
 			sem_wait(lock);
 			memset(msg_sock, '\0', sizeof(msg_sock));
 			memset(direction, '\0', sizeof(direction));
-			sscanf(message, "%s %f %d", direction, &speed, &time);
-			speed = ((speed*(1/0.02)*60)/374);
-			time = time/250;
+			sscanf(foo->reading, "%s %f %d", direction, &speed, &time);
+			speed	= ((speed*(1/0.02)*60)/374);
+			time	= time/250;
 			sprintf(msg_sock, "%s %d %d", direction, (int)speed, time);
 			if(strncmp(msg_sock, last_msg, strlen(msg_sock)) != 0)
 			{
 				write(chat_fd, msg_sock, strlen(msg_sock));
 			}
 			strncpy(last_msg, msg_sock, strlen(msg_sock));
-			printf("send: %s\n", msg_sock);
 			sem_post(lock);
 		}
 	}
@@ -61,15 +68,25 @@ static void *send_msg(void *args)
 /* thread to receive data */
 static void *recv_msg(void *args)
 {
-	char rec_mess[20];
+	struct data *foo_r = (struct data *)args;
+	char rec_mess[100];
+	int sem_cur;
 	while(1)
 	{
 		memset(rec_mess, '\0', sizeof(rec_mess));
 		read(chat_fd, rec_mess, sizeof(rec_mess));
 		if(strncmp(rec_mess, "exit", 4) == 0)
 		{
+			sem_getvalue(lock, &sem_cur);
 			pthread_cancel(smg);
+			if(sem_cur == 0)
+				sem_post(lock);
 			break;
+		}
+		else
+		{
+			memset(foo_r->setting, '\0', sizeof(foo_r->setting));
+			strncpy(foo_r->setting, rec_mess, strlen(rec_mess));
 		}
 	}
 	close(chat_fd);
@@ -79,7 +96,7 @@ static void *recv_msg(void *args)
 /* thread to read motor state */
 static void *read_encoder(void *args)
 {
-	char *encoder = (char *)args;
+	struct data *foo_r = (struct data *)args;
 	int fd_en;
 	fd_en = open("/dev/dongco", O_RDONLY);
 	if(-1 == fd_en)
@@ -90,19 +107,69 @@ static void *read_encoder(void *args)
 	while(1)
 	{
 		sem_wait(lock);
-		memset(args, '\0', sizeof(args));
-		read(fd_en, encoder, sizeof(encoder));
+		memset(foo_r->reading, '\0', sizeof(foo_r->reading));
+		read(fd_en, foo_r->reading, sizeof(foo_r->reading));
 		sem_post(lock);
-		usleep(20000);
 	}
 }
 /* thread write motor file */
 static void *write_motor(void *args)
 {
-	/* do something */
-	while(1);
+	struct data *foo = (struct data *)args;
+	char dir[100], set_dir[100];
+	double Kp = 0.01;
+	double Ki = 0.0002;
+	double Kd = 0.04;
+	double T = 0.02;
+	double speed, setpoint, E, E1, E2, alpha, beta, gamma;
+	uint32_t out, last_out;
+	int fd_control;
+	fd_control = open("/dev/dongco", O_RDWR);
+	if(-1 == fd_control)
+	{
+		printf("cannot control motor\n");
+		exit(EXIT_FAILURE);
+	}
+	while(1)
+	{
+		while(foo->setting == NULL || foo->reading == NULL);
+		memset(set_dir, '\0', sizeof(set_dir));
+		sscanf(foo->setting, "%s %f", set_dir, &setpoint);
+		memset(dir, '\0', sizeof(dir));
+		sscanf(foo->reading, "%s %f %s", dir, &speed, NULL);
+		speed = ((speed*(1/0.02)*60)/374);
+		if(strncmp(set_dir, dir, strlen(set_dir)) != 0)
+		{
+			/* Stop for any seconds */
+		}
+		E		= setpoint - speed;
+		alpha		= 2*T*Kp + Ki*T*T + 2*Kd;
+ 		beta		= T*T*Ki - 4*Kd - 2*T*Kp;
+ 		gamma		= 2*Kd;
+  		out		= (alpha*E + beta*E1 + gamma*E2 + 2*T*last_out)/(2*T);
+		if(out>255)
+			out = 255;
+		else if(out<0)
+			out = 0;
+		out *= 31875/255;
+  		last_out	= out;
+		E2		= E1;
+		E1		= E;
+		if(strncmp(set_dir, "Forward", strlen("forward")) == 0)
+		{
+			ioctl(fd_control, FORWARD, (uint32_t *)&out);
+		}
+		else if(strncmp(set_dir, "Reverse", strlen("reverse")) == 0)
+		{
+			ioctl(fd_control, REVERSE, (uint32_t *)&out);
+		}
+		else
+		{
+			ioctl(fd_control, STOP, NULL);
+		}
+	}
 }
-
+/* handler stop signal */
 static void process_management(int num)
 {
 	wait(NULL);
@@ -124,14 +191,16 @@ int main(int argc, char **argv)
 {
 	pid_t read_dev;
 	/* create shared memory  */
-	int fd;
+	int fd, set;
 	fd = shm_open(shared, O_CREAT| O_RDWR, 666);
-	if(-1 == fd)
+	set = shm_open(set_point, O_CREAT| O_RDWR, 666);
+	if(-1 == fd || -1 == set)
 	{
 		printf("Cannot create fd of shared memory\n");
 		return -1;
 	}
 	ftruncate(fd, 100);
+	ftruncate(set, 100);
 	/* init semaphore */
 	lock = sem_open(named_semaphore, O_CREAT|O_EXCL, 666, 1);
 	if(lock == SEM_FAILED)
@@ -160,19 +229,24 @@ int main(int argc, char **argv)
 	{
 		if(read_dev == 0)
 		{
+			struct data sh;
 			/* process con */
 			/* child process create 2 threads, 1 for read encoder and 1 for write control data to motor */
-			char *shared_mem = (char *)mmap(NULL, 100, PROT_READ| PROT_WRITE, MAP_SHARED, fd, 0);
-			if(shared_mem == NULL)
+			sh.reading	= (char *)mmap(NULL, 100, PROT_READ| PROT_WRITE, MAP_SHARED, fd, 0);
+			sh.setting	= (char *)mmap(NULL, 100, PROT_READ, MAP_SHARED, set, 0);
+			//sh->setting		= (char *)spoint;
+			//sh->reading		= (char *)shared_mem;
+			if(sh.reading == NULL|| sh.setting == NULL)
 			{
 				printf("Cannot mapping to physical address!\n");
 				return -1;
 			}
-			pthread_create(&r_e, NULL, &read_encoder, shared_mem);
-			pthread_create(&wm, NULL, &write_motor, NULL);
+			pthread_create(&r_e, NULL, &read_encoder, &sh);
+			pthread_create(&wm, NULL, &write_motor, &sh);
 			pthread_join(r_e, NULL);
 			pthread_join(wm, NULL);
-			munmap(shared_mem, 100);
+			munmap(sh.reading, 100);
+			munmap(sh.setting, 100);
 		}
 		else
 		{
@@ -180,6 +254,7 @@ int main(int argc, char **argv)
 			/* process cha create 2 threads, 1 for send data to GUI and 1 for received */
 			int server_socket, port_no, len;
 			struct sockaddr_in server_addr, client_addr;
+			struct data sh;
 			/* parent config for processing */
 			if(argc < 2)
 			{
@@ -194,9 +269,9 @@ int main(int argc, char **argv)
 				printf("Cannot create endpoint\n");
 				return -1;
 			}
-			server_addr.sin_family = AF_INET;
-			server_addr.sin_port = htons(port_no);
-			server_addr.sin_addr.s_addr = INADDR_ANY;
+			server_addr.sin_family		= AF_INET;
+			server_addr.sin_port		= htons(port_no);
+			server_addr.sin_addr.s_addr 	= INADDR_ANY;
 			if(bind(server_socket, (const struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
 			{
 				printf("Cannot bind socket with address and port\n");
@@ -216,20 +291,25 @@ int main(int argc, char **argv)
 				system("clear");
 				printf("Server got connection\n");	
 				/* mapping shared memory to virtual address */
-				char *shared_mem = (char *)mmap(NULL, 100, PROT_READ| PROT_WRITE, MAP_SHARED, fd, 0);
-				if(shared_mem == NULL)
+				sh.reading	= (char *)mmap(NULL, 100, PROT_READ| PROT_WRITE, MAP_SHARED, fd, 0);
+				sh.setting	= (char *)mmap(NULL, 100, PROT_WRITE, MAP_SHARED, set, 0);
+				//sh->setting 		= (char *)spoint;
+				//sh->reading 		= (char *)shared_mem;
+				if(sh.setting == NULL|| sh.reading == NULL)
 				{
 					printf("Cannot mapping to physical address!\n");
 					return -1;
 				}
 				/* neu ket noi socket thanh cong thi tao ra 2 threads de gui nhan data */
-				pthread_create(&smg, NULL, &send_msg, shared_mem);
-				pthread_create(&rmg, NULL, &recv_msg, NULL);
+				pthread_create(&smg, NULL, &send_msg, &sh);
+				pthread_create(&rmg, NULL, &recv_msg, &sh);
 				signal(SIGCHLD, process_management);
 				pthread_join(smg, NULL);
 				pthread_join(rmg, NULL);
-				munmap(shared_mem, 100);
+				munmap(sh.setting, 100);
+				munmap(sh.reading, 100);
 				shm_unlink(shared);
+				shm_unlink(set_point);
 			}
 		}
 	}
