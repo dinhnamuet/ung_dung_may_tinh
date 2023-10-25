@@ -24,6 +24,8 @@ pthread_t smg, rmg; /* threads of parent */
 pthread_t r_e, wm; /* threads of child */
 int chat_fd;
 sem_t *lock;
+pthread_mutex_t motor_lock	= PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t read_done	= PTHREAD_COND_INITIALIZER;
 
 struct data {
 	char *setting;
@@ -107,8 +109,11 @@ static void *read_encoder(void *args)
 	while(1)
 	{
 		sem_wait(lock);
+		pthread_mutex_lock(&motor_lock);
 		memset(foo_r->reading, '\0', sizeof(foo_r->reading));
 		read(fd_en, foo_r->reading, sizeof(foo_r->reading));
+		pthread_cond_signal(&read_done);
+		pthread_mutex_unlock(&motor_lock);
 		sem_post(lock);
 	}
 }
@@ -132,15 +137,18 @@ static void *write_motor(void *args)
 	}
 	while(1)
 	{
-		while(foo->setting == NULL || foo->reading == NULL);
 		memset(set_dir, '\0', sizeof(set_dir));
 		sscanf(foo->setting, "%s %f", set_dir, &setpoint);
 		memset(dir, '\0', sizeof(dir));
+		pthread_mutex_lock(&motor_lock);
+		pthread_cond_wait(&read_done, &motor_lock);
 		sscanf(foo->reading, "%s %f %s", dir, &speed, NULL);
+		pthread_mutex_unlock(&motor_lock);
 		speed = ((speed*(1/0.02)*60)/374);
 		if(strncmp(set_dir, dir, strlen(set_dir)) != 0)
 		{
-			/* Stop for any seconds */
+			ioctl(fd_control, STOP, NULL);
+			sleep(2);
 		}
 		E		= setpoint - speed;
 		alpha		= 2*T*Kp + Ki*T*T + 2*Kd;
