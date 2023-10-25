@@ -210,7 +210,6 @@ static int __init dongco_init(void)
 {
 	uint32_t middle_config;
 	uint64_t tick_per_sec;
-	//uint32_t irq_number;
 	/* allocate device number */
 	if(alloc_chrdev_region(&dongco.dev_num, 0, 1, DEV_NAME) < 0)
 	{
@@ -293,10 +292,10 @@ static int __init dongco_init(void)
 		printk(KERN_ERR "cannot init pwm\n");
 		goto rm_buff;
 	}
-	pwm_config(dongco.dc_pwm, 21875, 31875);
+	pwm_config(dongco.dc_pwm, 0, 31875);
 	pwm_enable(dongco.dc_pwm);
 
-	motor_forward();
+	//motor_forward();
 
 	tick_per_sec		= HZ;
 	printk(KERN_INFO "Init success!, HZ = %lld\n", tick_per_sec);

@@ -146,7 +146,7 @@ static void *write_motor(void *args)
 		alpha		= 2*T*Kp + Ki*T*T + 2*Kd;
  		beta		= T*T*Ki - 4*Kd - 2*T*Kp;
  		gamma		= 2*Kd;
-  		out		= (alpha*E + beta*E1 + gamma*E2 + 2*T*last_out)/(2*T);
+  		out		= (int)(alpha*E + beta*E1 + gamma*E2 + 2*T*last_out)/(2*T);
 		if(out>255)
 			out = 255;
 		else if(out<0)
@@ -157,11 +157,11 @@ static void *write_motor(void *args)
 		E1		= E;
 		if(strncmp(set_dir, "Forward", strlen("forward")) == 0)
 		{
-			ioctl(fd_control, FORWARD, (uint32_t *)&out);
+			ioctl(fd_control, FORWARD, &out);
 		}
 		else if(strncmp(set_dir, "Reverse", strlen("reverse")) == 0)
 		{
-			ioctl(fd_control, REVERSE, (uint32_t *)&out);
+			ioctl(fd_control, REVERSE, &out);
 		}
 		else
 		{
