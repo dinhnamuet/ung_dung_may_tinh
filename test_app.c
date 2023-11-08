@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <sys/ioctl.h>
 #include "dongco.h"
+#define period 10000
 void GUI()
 {
 	printf(" _______________________________________________\n");
@@ -19,7 +20,7 @@ void GUI()
 int main(int argc, char **argv[])
 {
 	uint32_t opt;
-	uint32_t speed;
+	uint32_t speed = 0;
 	int fd;
 	fd = open("/dev/dongco", O_RDWR);
 	if(-1 == fd)
@@ -30,20 +31,21 @@ int main(int argc, char **argv[])
 	while(1)
 	{
 		system("clear");
+		printf("Vtb: %.2f\n", (float)speed*11.1/period);
 		GUI();
 		scanf("%d", &opt);
 		switch(opt)
 		{
 			case 1:
-				printf("% pwm = ");
+				printf("duty cycle = ");
 				scanf("%d", &speed);
-				speed = (int)(speed*31875/100);
+				speed = (int)(speed*period/100);
 				ioctl(fd, FORWARD, &speed);
 				break;
 			case 2:
-				printf("% pwm = ");
+				printf("duty cycle = ");
 				scanf("%d", &speed);
-				speed = (int)(speed*31875/100);
+				speed = (int)(speed*period/100);
 				ioctl(fd, REVERSE, &speed);
 				break;
 			case 3:

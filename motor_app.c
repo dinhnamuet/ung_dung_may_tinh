@@ -112,6 +112,7 @@ static void *read_encoder(void *args)
 		pthread_mutex_lock(&motor_lock);
 		memset(foo_r->reading, '\0', sizeof(foo_r->reading));
 		read(fd_en, foo_r->reading, sizeof(foo_r->reading));
+		sleep(0.02);
 		pthread_cond_signal(&read_done);
 		pthread_mutex_unlock(&motor_lock);
 		sem_post(lock);
@@ -122,13 +123,20 @@ static void *write_motor(void *args)
 {
 	struct data *foo = (struct data *)args;
 	char dir[100], set_dir[100];
-	double Kp = 0.01;
-	double Ki = 0.0002;
-	double Kd = 0.04;
-	double T = 0.02;
-	double speed, setpoint, E, E1, E2, alpha, beta, gamma;
-	uint32_t out, last_out;
+	double Kp		= 0.01;
+	double Ki		= 0.04;
+	double Kd		= 0.0002;
+	uint32_t setpoint	= 0;
+	uint32_t read_speed	= 0;
+	double speed, E, E1;
+	double integral, derivative;
+	int mid = 0;
+	uint32_t output = 0;
 	int fd_control;
+	integral	= 0;
+	derivative	= 0;
+	E		= 0;
+	E1		= 0;
 	fd_control = open("/dev/dongco", O_RDWR);
 	if(-1 == fd_control)
 	{
@@ -138,38 +146,45 @@ static void *write_motor(void *args)
 	while(1)
 	{
 		memset(set_dir, '\0', sizeof(set_dir));
-		sscanf(foo->setting, "%s %f", set_dir, &setpoint);
+		while(foo->setting == NULL);
+		sscanf(foo->setting, "%s %d", set_dir, &setpoint);
 		memset(dir, '\0', sizeof(dir));
 		pthread_mutex_lock(&motor_lock);
 		pthread_cond_wait(&read_done, &motor_lock);
-		sscanf(foo->reading, "%s %f %s", dir, &speed, NULL);
+		sscanf(foo->reading, "%s %d %s", dir, &read_speed, NULL);
 		pthread_mutex_unlock(&motor_lock);
-		speed = ((speed*(1/0.02)*60)/374);
+		speed = ((double)(read_speed*(1/0.02)*60)/374);
 		if(strncmp(set_dir, dir, strlen(set_dir)) != 0)
 		{
 			ioctl(fd_control, STOP, NULL);
 			sleep(2);
 		}
-		E		= setpoint - speed;
-		alpha		= 2*T*Kp + Ki*T*T + 2*Kd;
- 		beta		= T*T*Ki - 4*Kd - 2*T*Kp;
- 		gamma		= 2*Kd;
-  		out		= (int)(alpha*E + beta*E1 + gamma*E2 + 2*T*last_out)/(2*T);
-		if(out>255)
-			out = 255;
-		else if(out<0)
-			out = 0;
-		out *= 31875/255;
-  		last_out	= out;
-		E2		= E1;
-		E1		= E;
-		if(strncmp(set_dir, "Forward", strlen("forward")) == 0)
+		E		= (double)setpoint - speed;
+		integral	+= E*0.02;
+		derivative	= (E-E1)/0.02;
+		mid		= (int)(Kp*E + Ki*integral + Kd*derivative);
+		mid		= (int)(mid *10000/11.1);
+		printf("current speed = %f\n", speed);
+		//printf("mid = %s\n", mid);
+		if(mid > 10000)
 		{
-			ioctl(fd_control, FORWARD, &out);
+			output = 10000;
 		}
-		else if(strncmp(set_dir, "Reverse", strlen("reverse")) == 0)
+		else if(mid < 0)
 		{
-			ioctl(fd_control, REVERSE, &out);
+			output = 0;
+		}
+		else
+		{
+			output = mid;
+		}
+		if(strncmp(set_dir, "Forward", strlen("Forward")) == 0)
+		{
+			ioctl(fd_control, FORWARD, &output);
+		}
+		else if(strncmp(set_dir, "Reverse", strlen("Reverse")) == 0)
+		{
+			ioctl(fd_control, REVERSE, &output);
 		}
 		else
 		{

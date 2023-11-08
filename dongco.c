@@ -165,7 +165,7 @@ static ssize_t dev_write(struct file *filep, const char *user_buff, size_t size,
 }
 static long dev_ioctl(struct file *filep, unsigned int cmd, unsigned long data)
 {
-	dongco.period = 31875;
+	dongco.period = 10000;
 	switch(cmd)
 	{
 		case FORWARD:
@@ -292,10 +292,10 @@ static int __init dongco_init(void)
 		printk(KERN_ERR "cannot init pwm\n");
 		goto rm_buff;
 	}
-	pwm_config(dongco.dc_pwm, 0, 31875);
+	pwm_config(dongco.dc_pwm, 0, 10000);
 	pwm_enable(dongco.dc_pwm);
 
-	//motor_forward();
+	//motor_stop();
 
 	tick_per_sec		= HZ;
 	printk(KERN_INFO "Init success!, HZ = %lld\n", tick_per_sec);
