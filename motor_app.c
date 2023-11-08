@@ -190,6 +190,7 @@ static void *write_motor(void *args)
 		{
 			ioctl(fd_control, STOP, NULL);
 		}
+		E1 = E;
 	}
 }
 /* handler stop signal */
