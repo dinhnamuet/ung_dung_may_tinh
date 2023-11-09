@@ -1,1 +1,0 @@
-cmd_/home/pi/Desktop/do_an_ky_7/ung_dung_may_tinh/dongco.mod := printf '%s\n'   dongco.o | awk '!x[$$0]++ { print("/home/pi/Desktop/do_an_ky_7/ung_dung_may_tinh/"$$0) }' > /home/pi/Desktop/do_an_ky_7/ung_dung_may_tinh/dongco.mod

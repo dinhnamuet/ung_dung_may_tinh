@@ -1,1 +1,0 @@
-cmd_/home/pi/Desktop/do_an_ky_7/ung_dung_may_tinh/dongco.ko := ld -r -EL  -maarch64elf -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T scripts/module.lds -o /home/pi/Desktop/do_an_ky_7/ung_dung_may_tinh/dongco.ko /home/pi/Desktop/do_an_ky_7/ung_dung_may_tinh/dongco.o /home/pi/Desktop/do_an_ky_7/ung_dung_may_tinh/dongco.mod.o;  true
