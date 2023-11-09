@@ -19,11 +19,13 @@
 #define shared "encoder_read"
 #define set_point "set_point"
 #define named_semaphore "process_lock"
+#define setpoint_lock "hehepro"
 /* b1 viet 1 process co 2 thread gui & nhan socket */
 pthread_t smg, rmg; /* threads of parent */
 pthread_t r_e, wm; /* threads of child */
 int chat_fd;
 sem_t *lock;
+sem_t *set_lock;
 pthread_mutex_t motor_lock	= PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t read_done	= PTHREAD_COND_INITIALIZER;
 
@@ -72,7 +74,9 @@ static void *recv_msg(void *args)
 {
 	struct data *foo_r = (struct data *)args;
 	char rec_mess[100];
+	char *reset = "reset";
 	int sem_cur;
+	int fd_reset;
 	while(1)
 	{
 		memset(rec_mess, '\0', sizeof(rec_mess));
@@ -87,8 +91,16 @@ static void *recv_msg(void *args)
 		}
 		else
 		{
-			memset(foo_r->setting, '\0', sizeof(foo_r->setting));
+			sem_wait(set_lock);
+			memset(foo_r->setting, '\0', 100);
 			strncpy(foo_r->setting, rec_mess, strlen(rec_mess));
+			fd_reset = open("/dev/dongco", O_WRONLY);
+			if(-1 == fd_reset)
+				pthread_exit(NULL);
+			write(fd_reset, reset, strlen(reset));
+			close(fd_reset);
+			sem_post(set_lock);
+			printf("%s\n", foo_r->setting);
 		}
 	}
 	close(chat_fd);
@@ -110,7 +122,7 @@ static void *read_encoder(void *args)
 	{
 		sem_wait(lock);
 		pthread_mutex_lock(&motor_lock);
-		memset(foo_r->reading, '\0', sizeof(foo_r->reading));
+		memset(foo_r->reading, '\0', 100);
 		read(fd_en, foo_r->reading, sizeof(foo_r->reading));
 		sleep(0.02);
 		pthread_cond_signal(&read_done);
@@ -145,9 +157,10 @@ static void *write_motor(void *args)
 	}
 	while(1)
 	{
+		sem_wait(set_lock);
 		memset(set_dir, '\0', sizeof(set_dir));
-		while(foo->setting == NULL);
 		sscanf(foo->setting, "%s %d", set_dir, &setpoint);
+		sem_post(set_lock);
 		memset(dir, '\0', sizeof(dir));
 		pthread_mutex_lock(&motor_lock);
 		pthread_cond_wait(&read_done, &motor_lock);
@@ -157,15 +170,13 @@ static void *write_motor(void *args)
 		if(strncmp(set_dir, dir, strlen(set_dir)) != 0)
 		{
 			ioctl(fd_control, STOP, NULL);
-			sleep(2);
+			sleep(1);
 		}
 		E		= (double)setpoint - speed;
 		integral	+= E*0.02;
 		derivative	= (E-E1)/0.02;
 		mid		= (int)(Kp*E + Ki*integral + Kd*derivative);
 		mid		= (int)(mid *10000/11.1);
-		printf("current speed = %f\n", speed);
-		//printf("mid = %s\n", mid);
 		if(mid > 10000)
 		{
 			output = 10000;
@@ -189,6 +200,12 @@ static void *write_motor(void *args)
 		else
 		{
 			ioctl(fd_control, STOP, NULL);
+			E		= 0;
+			E1		= 0;
+			integral	= 0;
+			derivative	= 0;
+			output		= 0;
+			mid		= 0;
 		}
 		E1 = E;
 	}
@@ -206,6 +223,8 @@ static void process_management(int num)
 static void free_sem(int num)
 {
 	sem_close(lock);
+	sem_close(set_lock);
+	sem_unlink(setpoint_lock);
 	sem_unlink(named_semaphore);
 	printf("Semaphore free success\n");
 	exit(EXIT_SUCCESS);
@@ -226,7 +245,8 @@ int main(int argc, char **argv)
 	ftruncate(fd, 100);
 	ftruncate(set, 100);
 	/* init semaphore */
-	lock = sem_open(named_semaphore, O_CREAT|O_EXCL, 666, 1);
+	lock		= sem_open(named_semaphore, O_CREAT|O_EXCL, 666, 1);
+	set_lock	= sem_open(setpoint_lock, O_CREAT|O_EXCL, 666, 1);
 	if(lock == SEM_FAILED)
 	{
 		if(errno != EEXIST)
@@ -240,6 +260,14 @@ int main(int argc, char **argv)
 			printf("Het cuu semaphore\n");
 			return -1;
 		}
+	}
+	if(set_lock == SEM_FAILED)
+	{
+		if(errno != EEXIST)
+			return -1;
+		set_lock = sem_open(setpoint_lock, 0);
+		if(set_lock == SEM_FAILED)
+			return -1;
 	}
 	signal(SIGINT, free_sem);
 	/* start operating */

@@ -135,19 +135,13 @@ static ssize_t dev_read(struct file *filep, char __user *user_buff, size_t size,
 static ssize_t dev_write(struct file *filep, const char *user_buff, size_t size, loff_t *offset)
 {
 	char direction[10];
-	int speed;
 	local_irq_disable(); //disable ngat
-	dongco.time_start = jiffies; //lay thoi gian luc bat dau dat setpoint
-	dongco.count = 0;
 	*offset = 0;
 	memset(direction, '\0', 10);
-	memset(dongco.kernel_buffer, '\0', PAGE_SIZE); //clear buffer
-	if(copy_from_user(dongco.kernel_buffer, user_buff, size) != 0) //get data from userspace
+	if(copy_from_user(direction, user_buff, size) != 0) //get data from userspace
 	{
 		return -EFAULT;
 	}
-	sscanf(dongco.kernel_buffer, "%s %d", direction, &speed); //split data
-	//printk(KERN_INFO "direction: %s, speed: %d\n", direction, speed);
 	if(strncmp(direction, "Forward", strlen("Foward")) == 0)
 	{
 		motor_forward();
@@ -160,7 +154,13 @@ static ssize_t dev_write(struct file *filep, const char *user_buff, size_t size,
 	{
 		motor_stop();
 	}
+	else if(strncmp(direction, "reset", strlen("reset")) == 0)
+	{
+		dongco.time_start	= jiffies;
+		dongco.count		= 0;
+	}
 	local_irq_enable(); //enable lai ngat
+	printk(KERN_INFO "RESET TIMER\n");
 	return size;
 }
 static long dev_ioctl(struct file *filep, unsigned int cmd, unsigned long data)
@@ -192,9 +192,8 @@ static long dev_ioctl(struct file *filep, unsigned int cmd, unsigned long data)
 			break;
 		default:
 			break;
-
 	}
-	printk(KERN_INFO "IOCTL called, duty cycle is %d\n", dongco.duty_cycle);
+	//printk(KERN_INFO "IOCTL called, duty cycle is %d\n", dongco.duty_cycle);
 	return 0;
 }
 struct file_operations fops = {
